@@ -1,4 +1,13 @@
-name: Azure Static Web Apps CI/CD
+# Deploys the Data Discrepancy Reporter to Azure Static Web Apps.
+#
+# - Every push to main updates the live site.
+# - Every pull request into main gets its own preview site, which is removed
+#   when the pull request is closed.
+#
+# One-time setup: add the deployment token as a repository secret named
+# AZURE_STATIC_WEB_APPS_API_TOKEN (see README.md, "Deploy with GitHub Actions").
+
+name: Deploy to Azure Static Web Apps
 
 on:
   push:
@@ -8,51 +17,43 @@ on:
     types: [opened, synchronize, reopened, closed]
     branches:
       - main
+  workflow_dispatch:        # adds a "Run workflow" button on the Actions tab
+
+permissions:
+  contents: read
+  pull-requests: write      # lets the deploy step comment the preview link on pull requests
+
+concurrency:
+  group: swa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build_and_deploy_job:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+  deploy:
+    name: Deploy
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
-    name: Build and Deploy Job
-    permissions:
-       id-token: write
-       contents: read
     steps:
-      - uses: actions/checkout@v3
-        with:
-          submodules: true
-          lfs: false
-      - name: Install OIDC Client from Core Package
-        run: npm install @actions/core@1.6.0 @actions/http-client
-      - name: Get Id Token
-        uses: actions/github-script@v6
-        id: idtoken
-        with:
-           script: |
-               const coredemo = require('@actions/core')
-               return await coredemo.getIDToken()
-           result-encoding: string
-      - name: Build And Deploy
-        id: builddeploy
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ASHY_BAY_0DB287400 }}
-          action: "upload"
-          ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
-          # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
-          app_location: "/" # App source code path
-          api_location: "" # Api source code path - optional
-          output_location: "." # Built app content directory - optional
-          github_id_token: ${{ steps.idtoken.outputs.result }}
-          ###### End of Repository/Build Configurations ######
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: "/"         # the folder that holds index.html
+          api_location: ""          # no API in this repository
+          output_location: ""       # nothing is built
+          skip_app_build: true      # plain HTML, CSS and JavaScript: deploy the files as they are
 
-  close_pull_request_job:
+  close_preview:
+    name: Remove pull request preview
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
-    name: Close Pull Request Job
     steps:
-      - name: Close Pull Request
-        id: closepullrequest
+      - name: Remove the preview site
         uses: Azure/static-web-apps-deploy@v1
         with:
-          action: "close"
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: close
